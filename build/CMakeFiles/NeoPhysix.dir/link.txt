@@ -1,0 +1,3 @@
+"C:\Program Files\CMake\bin\cmake.exe" -E rm -f CMakeFiles\NeoPhysix.dir/objects.a
+C:\MinGW\bin\ar.exe qc CMakeFiles\NeoPhysix.dir/objects.a @CMakeFiles\NeoPhysix.dir\objects1.rsp
+C:\MinGW\bin\g++.exe  -static -shared -o libNeoPhysix.dll -Wl,--out-implib,libNeoPhysix.dll.a -Wl,--major-image-version,0,--minor-image-version,0 -Wl,--whole-archive CMakeFiles\NeoPhysix.dir/objects.a -Wl,--no-whole-archive @CMakeFiles\NeoPhysix.dir\linkLibs.rsp
