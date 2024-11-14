@@ -1,2 +1,0 @@
-# NeoPhysIx.py
-NeoPhysIx.py
