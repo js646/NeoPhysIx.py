@@ -1,9 +1,13 @@
+import math
+
 import numpy as np
 import pygame
+import glm
 from OpenGL.GL import *
 from OpenGL.GLU import *
 
 from custom_math import Vector3D, cross_product
+from text_renderer import TextRenderer
 
 
 # -- static methods --
@@ -20,8 +24,9 @@ def check_opengl_version():
         version = version.decode("utf-8")
         print(f"OpenGL Version: {version}")
         major_version = int(version.split(".")[0])
-        if major_version < 2:
-            raise RuntimeError("OpenGL version 2.0 or higher is required.")
+        minor_version = int(version.split(".")[1])
+        if major_version < 3 or (major_version == 3 and minor_version < 3):
+            raise RuntimeError("OpenGL version 3.3 or higher is required.")
     else:
         raise RuntimeError("Unable to determine OpenGL version.")
 
@@ -68,7 +73,10 @@ class Graphics:
         self.aspect_ratio = self.window_width / self.window_height
 
         # Init pygame window with OPENGL/DOUBLEBUF mode
-        self.window = pygame.display.set_mode(self.window_size, pygame.OPENGL | pygame.DOUBLEBUF)
+        pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
+        pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
+        pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
+        self.window = pygame.display.set_mode(self.window_size, pygame.OPENGL | pygame.DOUBLEBUF | pygame.HWSURFACE)
         pygame.display.set_caption(self.window_title)  # sets the window title
 
         # Perspective
@@ -76,6 +84,12 @@ class Graphics:
         self.near_plane = 0.1  # distance from camera to near clipping plane
         self.far_plane = 100.0  # distance from camera to far clipping plane
 
+        # Camera transformation
+        self.camera_position = glm.vec3(0.0, 1.0, -12.0)
+        self.camera_target = glm.vec3(0.0, 0.0, 0.0)
+        self.camera_up = glm.vec3(0.0, 1.0, 0.0)
+
+        self.rotation_speed = 0.05
         self.y_rotate, self.x_rotate = 0.0, 0.0  # rotation angels
         self.x_move, self.y_move, self.z_move = 0.0, 0.0, 0.0  # perspective offsets
 
@@ -83,17 +97,15 @@ class Graphics:
         self.pressed_mouse_buttons = [False, False, False]  # currently pressed mouse buttons [left, mid, right]
         self.x_old, self.y_old = -1.0, -1.0  # used to save the old mouse position coordinates
 
-        # Create additional Pygame window for text output
-        self.text_window = pygame.Surface((self.window_width, self.window_height))
-        self.font = pygame.font.SysFont('Arial', 18)
-
-        # Placeholder
+        # rendering data
         self.landscape_vertices = None
         self.landscape_colors = None
 
+        # text renderer
+        self.text_renderer = TextRenderer(self.window_width, self.window_height)  # init TextRenderer
+
         # --- OpenGL ---
         self.background_color = (0.1, 0.2, 0.2, 1)  # RGBA
-        self.camera_starting_point = (0, -1, -12)  # XYZ
 
         # Set background color and enable depth testing
         glClearColor(self.background_color[0], self.background_color[1], self.background_color[2], self.background_color[3])
@@ -108,65 +120,49 @@ class Graphics:
             vertex_shader_source = f.read()
         with open("shader/fragment_shader.glsl", "r") as f:
             fragment_shader_source = f.read()
-        self.shader = create_shader_program(vertex_shader_source, fragment_shader_source)
+        self.shader_program = create_shader_program(vertex_shader_source, fragment_shader_source)
 
-        # Init transformation matrices used in shader programm
-        self.init_shader_matrices()
+        # Transformation matrices
+        self.model_matrix = glm.mat4(1.0)  # Identity matrix
+        self.view_matrix = glm.lookAt(self.camera_position, self.camera_target, self.camera_up)
+        self.projection_matrix = glm.perspective(glm.radians(self.fov), self.aspect_ratio, self.near_plane,
+                                                 self.far_plane)
 
-    def init_shader_matrices(self):
-        # -- Initialize the transformation matrices used in the shader program --
-        glUseProgram(self.shader)
+        # Set matrices in the shader
+        self.set_shader_matrices()
 
-        # Set starting perspective (modifies projection matrix of OpenGL context)
-        glMatrixMode(GL_PROJECTION)  # change matrix mode to modify the projection matrix of the OpenGL context
-        gluPerspective(self.fov, self.aspect_ratio, self.near_plane, self.far_plane)
-        glTranslatef(self.camera_starting_point[0], self.camera_starting_point[1], self.camera_starting_point[2])
-        glMatrixMode(GL_MODELVIEW)  # change matrix mode back to modelview
+    def set_shader_matrices(self):
+        glUseProgram(self.shader_program)
 
-        # Get uniform locations for matrices used in shader program (memory locations in GPU)
-        model_loc = glGetUniformLocation(self.shader, "model")
-        view_loc = glGetUniformLocation(self.shader, "view")
-        projection_loc = glGetUniformLocation(self.shader, "projection")
+        # Get uniform locations
+        model_loc = glGetUniformLocation(self.shader_program, "model")
+        view_loc = glGetUniformLocation(self.shader_program, "view")
+        projection_loc = glGetUniformLocation(self.shader_program, "projection")
 
-        # Init matrices
-        projection_matrix = np.identity(4, dtype=np.float32)  # placeholder for projection matrix from OpenGL context
-        glGetFloatv(GL_PROJECTION_MATRIX, projection_matrix)  # get current projection matrix from OpenGL context
-        view_matrix = np.identity(4, dtype=np.float32)  # init with identity matrix
-        model_matrix = np.identity(4, dtype=np.float32)  # init with identity matrix
-
-        # Transfer matrices into shader program memory
-        glUniformMatrix4fv(projection_loc, 1, GL_FALSE, projection_matrix)
-        glUniformMatrix4fv(view_loc, 1, GL_FALSE, view_matrix)
-        glUniformMatrix4fv(model_loc, 1, GL_FALSE, model_matrix)
+        # Pass matrices to the shader
+        glUniformMatrix4fv(model_loc, 1, GL_FALSE, glm.value_ptr(self.model_matrix))
+        glUniformMatrix4fv(view_loc, 1, GL_FALSE, glm.value_ptr(self.view_matrix))
+        glUniformMatrix4fv(projection_loc, 1, GL_FALSE, glm.value_ptr(self.projection_matrix))
 
         glUseProgram(0)
-        # -----
 
-        # Check OpenGL version and error
-        check_opengl_version()
+        # Check OpenGL error
         check_opengl_error()
 
-    def update_shader_view_matrix(self):
-        glUseProgram(self.shader)
+    def update_camera_position(self, delta_position):
+        self.camera_position += glm.vec3(delta_position)
+        self.view_matrix = glm.lookAt(self.camera_position, self.camera_target, self.camera_up)
+        self.set_shader_matrices()
 
-        view_matrix = np.identity(4, dtype=np.float32)
-        view_loc = glGetUniformLocation(self.shader, "view")
+    def update_projection_matrix(self, fov=None, aspect_ratio=None):
+        if fov is not None:
+            self.fov = fov
+        if aspect_ratio is not None:
+            self.aspect_ratio = aspect_ratio
 
-        glGetFloatv(GL_MODELVIEW_MATRIX, view_matrix)  # get current view matrix from OpenGL context
-        glUniformMatrix4fv(view_loc, 1, GL_FALSE, view_matrix)  # update view matrix of shader
-
-        glUseProgram(0)
-
-    def update_shader_projection_matrix(self):
-        glUseProgram(self.shader)
-
-        projection_matrix = np.identity(4, dtype=np.float32)
-        projection_loc = glGetUniformLocation(self.shader, "projection")
-
-        glGetFloatv(GL_PROJECTION_MATRIX, projection_matrix)  # get current projection matrix from OpenGL context
-        glUniformMatrix4fv(projection_loc, 1, GL_FALSE, projection_matrix)  # update projection matrix of shader
-
-        glUseProgram(0)
+        self.projection_matrix = glm.perspective(glm.radians(self.fov), self.aspect_ratio, self.near_plane,
+                                                 self.far_plane)
+        self.set_shader_matrices()
 
     def update_screen(self):
         pygame.display.flip()
@@ -176,7 +172,7 @@ class Graphics:
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
         # Use the shader
-        glUseProgram(self.shader)
+        glUseProgram(self.shader_program)
 
         # draw environment and objects
         self.draw_landscape(landscape, max_world)
@@ -339,98 +335,110 @@ class Graphics:
         check_opengl_error()
         glBindVertexArray(0)
 
-    def draw_text(self, cpu_time, gfx_step, counter, run_time, pos):
+    def draw_text(self, cpu_time, run_time, gfx_step, step_counter, xpos, ypos):
+        # text to render
         lines = [
             f"CPU time: {cpu_time:.4f}s for {gfx_step} steps",
-            f"Simulated robot time: {counter / 360000.0:.2f}h ({counter} steps)",
+            f"Simulated robot time: {step_counter / 360000.0:.2f}h ({step_counter} steps)",
             f"Total run time: {run_time:.0f}s",
         ]
-
-        # Schalte in den 2D-Ortho-Modus für Text-Rendering
-        glMatrixMode(GL_PROJECTION)
-        glPushMatrix()
-        glLoadIdentity()
-        gluOrtho2D(0, self.window_width, 0, self.window_height)
-
-        glMatrixMode(GL_MODELVIEW)
-        glPushMatrix()
-        glLoadIdentity()
-
-        glDisable(GL_DEPTH_TEST)  # Tiefentest für 2D-Rendering deaktivieren
-        glEnable(GL_BLEND)  # Alpha-Blending aktivieren für Transparenz
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-
-        # Text zeichnen
-        y_offset = self.font.get_linesize()
-        for line in lines:
-            text_surface = self.font.render(line, True, (255, 255, 255))
-            text_data = pygame.image.tostring(text_surface, "RGBA", True)
-            width, height = text_surface.get_size()
-
-            glRasterPos2f(pos[0], self.window_height - pos[1] - y_offset)
-            glDrawPixels(width, height, GL_RGBA, GL_UNSIGNED_BYTE, text_data)
-
-            y_offset += self.font.get_linesize()
-
-        # Auf ursprüngliche Einstellungen zurücksetzen
-        glDisable(GL_BLEND)
-        glPopMatrix()  # Zurück zur Modellansichtsmatrix
-        glMatrixMode(GL_PROJECTION)
-        glPopMatrix()
-        glMatrixMode(GL_MODELVIEW)
-        glEnable(GL_DEPTH_TEST)  # Tiefentest wieder aktivieren
+        self.text_renderer.render_text(lines, xpos, ypos, 1.0, (1.0, 1.0, 1.0))
 
     def handle_control_events(self, event):
         camera_speed = 0.3  # velocity of camera movement
-        glMatrixMode(GL_PROJECTION)  # to modify projection_matrix
+
         if event.type == pygame.MOUSEBUTTONDOWN:
             if event.button == 4:  # mousewheel up
-                glTranslatef(0, 0, camera_speed)  # moves camera to the front
-            elif event.button == 5:  # mousewheel up down
-                glTranslatef(0, 0, -camera_speed)  # moves camera to the back
-            self.update_shader_projection_matrix()
+                self.camera_position += glm.normalize(self.camera_target - self.camera_position) * camera_speed  # moves camera forward
+            elif event.button == 5:  # mousewheel down
+                self.camera_position -= glm.normalize(self.camera_target - self.camera_position) * camera_speed  # moves camera backward
+
+            # Update the view matrix
+            self.view_matrix = glm.lookAt(self.camera_position, self.camera_target, self.camera_up)
+            self.set_shader_matrices()
+
         elif event.type == pygame.KEYDOWN:
+            # Calculate right and up vectors relative to the current camera direction
+            camera_direction = glm.normalize(self.camera_target - self.camera_position)
+            right_vector = glm.normalize(glm.cross(camera_direction, self.camera_up))
+            up_vector = glm.normalize(self.camera_up)
+
             if event.key == pygame.K_LEFT:
-                glTranslatef(camera_speed, 0, 0)  # moves camera to the left 0)
+                self.camera_position -= right_vector * camera_speed  # moves camera left
+                self.camera_target -= right_vector * camera_speed
             elif event.key == pygame.K_RIGHT:
-                glTranslatef(-camera_speed, 0, 0)  # moves camera to the right
+                self.camera_position += right_vector * camera_speed  # moves camera right
+                self.camera_target += right_vector * camera_speed
             elif event.key == pygame.K_UP:
-                glTranslatef(0, -camera_speed, 0)  # moves camera upwards
+                self.camera_position += up_vector * camera_speed  # moves camera up
+                self.camera_target += up_vector * camera_speed
             elif event.key == pygame.K_DOWN:
-                glTranslatef(0, camera_speed, 0)  # moves camera downwards
-            self.update_shader_projection_matrix()
-        glMatrixMode(GL_MODELVIEW)
+                self.camera_position -= up_vector * camera_speed  # moves camera down
+                self.camera_target -= up_vector * camera_speed
+
+            # Update the view matrix
+            self.view_matrix = glm.lookAt(self.camera_position, self.camera_target, self.camera_up)
+            self.set_shader_matrices()
 
     def handle_mouse_actions(self):
         self.get_mouse_interaction_data()
 
-        # Apply transformations based on mouse interactions
-        if self.pressed_mouse_buttons[0] is True:  # left click
-            glRotatef(self.x_rotate, 1, 0, 0)
-            glRotatef(self.y_rotate, 0, 1, 0)
-            self.update_shader_view_matrix()
-        elif self.pressed_mouse_buttons[2] is True:  # right click
-            glTranslatef(self.x_move, self.y_move, self.z_move)
-            self.update_shader_view_matrix()
+        if self.pressed_mouse_buttons[0]:  # left click
+            # Convert rotation to radians
+            horizontal_angle = glm.radians(self.y_rotate * self.rotation_speed)
+            vertical_angle = glm.radians(self.x_rotate * self.rotation_speed)
+
+            # Rotate camera around the target
+            radius = glm.length(self.camera_position - self.camera_target)
+
+            # Calculate current spherical coordinates
+            current_direction = glm.normalize(self.camera_position - self.camera_target)
+            theta = math.atan2(current_direction.z, current_direction.x)
+            phi = math.acos(current_direction.y)
+
+            # Update angles
+            theta -= horizontal_angle
+            phi -= vertical_angle
+
+            # Clamp phi to avoid flipping
+            phi = glm.clamp(phi, 0.1, math.pi - 0.1)
+
+            # Convert back to Cartesian coordinates
+            new_position = self.camera_target + radius * glm.vec3(
+                math.sin(phi) * math.cos(theta),
+                math.cos(phi),
+                math.sin(phi) * math.sin(theta)
+            )
+
+            self.camera_position = new_position
+            self.view_matrix = glm.lookAt(self.camera_position, self.camera_target, self.camera_up)
+            self.set_shader_matrices()
+
+        elif self.pressed_mouse_buttons[2]:  # right click
+            # Pan camera (move target and position together)
+            right = glm.normalize(glm.cross(self.camera_up, glm.normalize(self.camera_target - self.camera_position)))
+            up = self.camera_up
+
+            pan_speed = 0.01
+            self.camera_position += right * self.x_move * pan_speed + up * self.y_move * pan_speed
+            self.camera_target += right * self.x_move * pan_speed + up * self.y_move * pan_speed
+
+            self.view_matrix = glm.lookAt(self.camera_position, self.camera_target, self.camera_up)
+            self.set_shader_matrices()
 
     def get_mouse_interaction_data(self):
         mouse_x, mouse_y = pygame.mouse.get_pos()
         self.pressed_mouse_buttons = pygame.mouse.get_pressed()
 
-        if self.pressed_mouse_buttons[0]:  # Left mouse button
+        if self.pressed_mouse_buttons[0] or self.pressed_mouse_buttons[2]:  # Left or right mouse button
             if self.x_old != -1 and self.y_old != -1:
-                self.y_rotate = float((mouse_x - self.x_old) / 10)
-                self.x_rotate = float((mouse_y - self.y_old) / 10)
+                self.y_rotate = float(mouse_x - self.x_old)
+                self.x_rotate = float(mouse_y - self.y_old)
+                if self.pressed_mouse_buttons[2]:
+                    self.x_move = self.y_rotate
+                    self.y_move = -self.x_rotate
             self.x_old = mouse_x
             self.y_old = mouse_y
-
-        elif self.pressed_mouse_buttons[2]:  # Right mouse button
-            if self.x_old != -1 and self.y_old != -1:
-                self.x_move = float((mouse_x - self.x_old) / 10)
-                self.z_move = float((mouse_y - self.y_old) / 10)
-            self.x_old = mouse_x
-            self.y_old = mouse_y
-
         else:
             self.x_old = -1
             self.y_old = -1

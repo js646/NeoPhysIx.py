@@ -1,31 +1,25 @@
-cmake_minimum_required(VERSION 3.27)
+cmake_minimum_required(VERSION 3.15)
 
-# Set C++ Standard
-set(CMAKE_CXX_STANDARD 11)
+# Project name and C++ standard
+project(NeoPhysIx LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Compiler settings (Adjust based on your compiler)
-set(CMAKE_C_COMPILER "C:/MinGW/bin/gcc.exe")
-set(CMAKE_CXX_COMPILER "C:/MinGW/bin/g++.exe")
+# Find Python and Pybind11
+find_package(Python REQUIRED COMPONENTS Interpreter Development)
 
-# Tells the compiler to link the DLLs statically, meaning directly inside the .dll/.pyd binary file
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static")
+# Note: If pybind11 is not found automatically, set the path explicitly.
+# Example: set(pybind11_DIR "path/to/pybind11/share/cmake/pybind11")
+# e.g: set(pybind11_DIR "/usr/local/Cellar/pybind11/2.13.6_1/share/cmake/pybind11")
+# e.g: set(pybind11_DIR "C:/Users/username/AppData/Local/Programs/Python/Python311/Lib/site-packages/pybind11/share/cmake/pybind11")
 
-# Use compiler optimizations (level 2)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2")
+find_package(pybind11 REQUIRED)
 
-# Set path to python exe
-set(Python_EXECUTABLE "C:/Users/Julian/AppData/Local/Programs/Python/Python311/python.exe")
+# Debug information
+message(STATUS "Found Python: ${Python_EXECUTABLE} (version: ${Python_VERSION})")
+message(STATUS "Found pybind11: ${pybind11_VERSION}")
 
-# Set pybind11_DIR path
-set(pybind11_DIR "C:/Users/Julian/AppData/Local/Programs/Python/Python311/Lib/site-packages/pybind11/share/cmake/pybind11")
-
-project(NeoPhysIx)
-
-find_package(pybind11 CONFIG REQUIRED)
-include_directories(${pybind11_INCLUDE_DIRS})
-message([MAIN] "Found pybind11 v${pybind11_VERSION}: ${pybind11_INCLUDE_DIRS}")
-
+# Add library source
 add_library(NeoPhysIx SHARED
     src/PhysicsEngine.cpp
     src/Environment.cpp
@@ -35,6 +29,25 @@ add_library(NeoPhysIx SHARED
     pybind_module.cpp
 )
 
-target_include_directories(NeoPhysIx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+# platform-specific settings. builds ".pyd" on Windows and ".so" on mac and unix
+if(WIN32)
+    set_target_properties(NeoPhysIx PROPERTIES PREFIX "" SUFFIX ".pyd")
+elseif(APPLE OR UNIX)
+    set_target_properties(NeoPhysIx PROPERTIES PREFIX "" SUFFIX ".so")
+endif()
 
+# Add include directories
+target_include_directories(NeoPhysIx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${pybind11_INCLUDE_DIRS})
+
+# Link library with pybind11
 target_link_libraries(NeoPhysIx PRIVATE pybind11::module)
+
+# Platform-specific compiler flags
+if(WIN32)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -static")
+elseif(APPLE)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
+elseif(UNIX)
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
+endif()
+

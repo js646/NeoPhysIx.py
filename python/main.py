@@ -61,6 +61,7 @@ def create_quadruped_robot():
 class App:
     def __init__(self):
         pygame.init()  # init pygame
+
         self.graphics = Graphics()  # init graphics
 
         # set the environment type (Plane, Ramp, Mountain, Apartment)
@@ -82,7 +83,7 @@ class App:
         self.robots = NeoPhysIx.get_robots()
 
         # simulation variables & counters
-        self.GFX_STEP = 10  # graphics gets painted after GFX_STEP simulation steps
+        self.GFX_STEP = 100  # graphics gets painted after GFX_STEP simulation steps
         self.step_counter = 0  # total amount of simulated steps
 
         # enter main loop
@@ -103,7 +104,7 @@ class App:
                     self.graphics.handle_mouse_actions()
 
             # influence CustomRobot movements
-            self.robots[1].set_joint_angles([0, 0.2, 0.5, 0])
+            # self.robots[1].set_joint_angles([0, 0.2, 0.5, 0])
 
             # capture start time
             cpu_time_start = time.perf_counter()
@@ -119,7 +120,7 @@ class App:
 
             # draw current scene and text
             self.graphics.draw_scene(self.landscape, self.robots, 128)
-            self.graphics.draw_text(cpu_time, self.GFX_STEP, self.step_counter, run_time, (10, 10))
+            self.graphics.draw_text(cpu_time, run_time, self.GFX_STEP, self.step_counter, 10, 10)
             self.graphics.update_screen()
 
             # self.print_robot_data()
