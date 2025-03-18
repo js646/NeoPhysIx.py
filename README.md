@@ -14,7 +14,7 @@ To start the application, execute the main.py file in the python directory:
 python python/main.py
 
 ## Rebuilding the NeoPhysIx Library
-If changes are made to the NeoPhysIx C++ codebase or the Pybind11 bindings, the library needs to be rebuilt to apply these changes in the Python environment.
+If changes are made to the NeoPhysIx C++ codebase or the pybind11 bindings, the library needs to be rebuilt to apply these changes in the Python environment.
 
 The following dependencies must be installed to rebuild the library:
 ```bash
@@ -24,20 +24,29 @@ Make sure the paths in the CMakeLists.txt file are configured correctly.
 
 To compile the library, follow these steps:
 
-Navigate to the build directory:
+Navigate to the build directory (you might have to create it first):
 
 ```bash
 cd build
 ```
 
-Run the following commands:
+Run the following commands to create the library:
 
+Windows:
 ```bash
+Windows:
+cd build
 cmake -G "MinGW Makefiles" ..
 cmake --build .
 ```
+MacOS/Linux:
+```bash
+cd build
+cmake -G "Unix Makefiles" ..
+cmake --build .
+```
 
-On Windows, rename the generated .dll file to a .pyd file and move it to the python directory:
+Move the generated .pyd/.so file to the python directory:
 
 ```bash
 ren libNeoPhysIx.dll NeoPhysIx.pyd
