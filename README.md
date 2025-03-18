@@ -34,14 +34,11 @@ Run the following commands to create the library:
 
 Windows:
 ```bash
-Windows:
-cd build
 cmake -G "MinGW Makefiles" ..
 cmake --build .
 ```
 MacOS/Linux:
 ```bash
-cd build
 cmake -G "Unix Makefiles" ..
 cmake --build .
 ```
